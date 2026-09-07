@@ -14,8 +14,8 @@ allow_version_literals: true
 
 ## 2026-09-07 · restructure · заведена вики
 
-Репозиторий поставлен под git и получил документацию по общей схеме семейства (скилл
-`orchestra-wiki`, канон — `partest_client/docs/wiki/WIKI.md`).
+Репозиторий поставлен под git и получил документацию по схеме, общей для семейства
+`partest`.
 
 Содержание взято из существовавших `AGENTS.md`, `README.md`, `CHANGELOG.md` и `pyproject.toml`.
 Ничего не придумано заново.
