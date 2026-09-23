@@ -1,0 +1,451 @@
+{# Дашборд прогонов. Ни одной ссылки наружу: plotly.js вшивается в файл, иконочный
+   шрифт убран совсем. Прототип тянул font-awesome и plotly с CDN — в закрытом контуре
+   заказчика такой отчёт открывается пустой страницей. #}
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Нагрузочное тестирование</title>
+  <style>
+    :root {
+      --bg: #f8f9fa;
+      --card-bg: white;
+      --text: #1e293b;
+      --accent: #3b82f6;
+      --good: #16a34a;
+      --warn: #ea580c;
+      --bad: #dc2626;
+      --up: #16a34a;
+      --down: #dc2626;
+    }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 0;
+    }
+    .container {
+      max-width: 1600px;
+      margin: 0 auto;
+      padding: 3.5rem 2rem 2rem;
+    }
+    h1 { margin-bottom: 0.4rem; }
+    .subtitle { color: #64748b; margin-bottom: 2rem; }
+
+    .notice {
+      max-width: 1600px;
+      margin: 0 auto 1.5rem;
+      padding: 0.9rem 1.2rem;
+      background: #fef3c7;
+      border: 1px solid #fcd34d;
+      border-radius: 8px;
+      color: #92400e;
+    }
+
+    .jump-to-sticky {
+      position: sticky;
+      top: 0;
+      background: rgba(248,249,250,0.96);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      z-index: 100;
+      padding: 1rem 0;
+      border-bottom: 1px solid #e2e8f0;
+      text-align: center;
+    }
+    .jump-to-sticky label {
+      margin-right: 0.8rem;
+      color: #475569;
+      font-weight: 500;
+      font-size: 1.05rem;
+    }
+    .jump-to-sticky select {
+      padding: 0.7rem 1.2rem;
+      font-size: 1rem;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      background: white;
+      min-width: 320px;
+      max-width: 90%;
+      cursor: pointer;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      transition: all 0.2s;
+    }
+    .jump-to-sticky select:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(59,130,246,0.2);
+    }
+
+    .endpoint-section {
+      margin-bottom: 4rem;
+      padding: 1.5rem;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+      scroll-margin-top: 100px;
+    }
+    .endpoint-header {
+      margin-bottom: 1.5rem;
+      padding-bottom: 1rem;
+      border-bottom: 2px solid #e2e8f0;
+    }
+    .endpoint-operation {
+      margin-top: 0.35rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.9rem;
+      color: #475569;
+    }
+    .cards-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+      gap: 1.5rem;
+    }
+
+    .endpoint-summary {
+      margin-top: 2.5rem;
+      padding: 1.5rem;
+      background: #f8fafc;
+      border-radius: 10px;
+      border: 1px solid #e2e8f0;
+    }
+    .status-light {
+      display: flex;
+      align-items: center;
+      gap: 0.8rem;
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin-bottom: 1.2rem;
+    }
+    .status-light.good { color: var(--good); }
+    .status-light.warn { color: var(--warn); }
+    .status-light.bad  { color: var(--bad); }
+    .dot {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+    .summary-facts {
+      list-style: none;
+      padding: 0;
+      margin: 0 0 1.2rem 0;
+    }
+    .summary-facts li {
+      margin-bottom: 0.7rem;
+      font-size: 1.05rem;
+    }
+    .recommendation {
+      font-style: italic;
+      color: #475569;
+      padding-top: 1rem;
+      border-top: 1px solid #e2e8f0;
+    }
+
+    .card {
+      background: var(--card-bg);
+      border-radius: 10px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+      padding: 1.5rem;
+      transition: transform 0.15s ease;
+    }
+    .card:hover { transform: translateY(-4px); }
+    .card-header {
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+    }
+    .timestamp { font-size: 0.85rem; color: #64748b; }
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1rem;
+      margin-bottom: 1.25rem;
+    }
+    .metric { text-align: center; }
+    .label { display: block; font-size: 0.85rem; color: #64748b; margin-bottom: 0.3rem; }
+    .value { font-size: 1.6rem; font-weight: 600; }
+    .good { color: var(--good); }
+    .warn { color: var(--warn); }
+    .bad  { color: var(--bad); }
+    .delta {
+      font-size: 0.9rem;
+      margin-left: 0.5rem;
+      padding: 0.2rem 0.4rem;
+      border-radius: 4px;
+      background: rgba(100,100,100,0.1);
+    }
+    .up { color: var(--up); }
+    .down { color: var(--down); }
+    .up.bad, .down.good { color: inherit; }
+    .saturation {
+      text-align: center;
+      padding: 0.6rem;
+      background: #fee2e2;
+      border-radius: 6px;
+      margin-bottom: 1rem;
+      font-size: 1rem;
+      color: #b91c1c;
+    }
+    .btn-details {
+      width: 100%;
+      padding: 0.8rem;
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 1rem;
+      transition: background 0.2s;
+    }
+    .btn-details:hover { background: #2563eb; }
+
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.55);
+      z-index: 1000;
+      justify-content: center;
+      align-items: center;
+      padding: 1rem;
+    }
+    .modal-content {
+      background: white;
+      border-radius: 12px;
+      max-width: 95%;
+      max-height: 92vh;
+      width: 1400px;
+      overflow-y: auto;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+    }
+    .modal-header {
+      padding: 1.2rem 1.8rem;
+      border-bottom: 1px solid #e2e8f0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .modal-close { font-size: 1.8rem; cursor: pointer; color: #64748b; }
+
+    .profile-settings strong {
+      color: #334155;
+      display: block;
+      font-size: 0.95rem;
+    }
+    .profile-settings span {
+      color: #1e293b;
+      font-weight: 500;
+    }
+  </style>
+{% if plotly_js %}
+  {# `safe` здесь обязателен: это сам plotly.js, а не данные. Экранирование превратило бы
+     библиотеку в текст. Содержимое берётся из установленного пакета или из файла,
+     указанного тем, кто собирает отчёт, — из сети не берётся никогда. #}
+  <script>{{ plotly_js | safe }}</script>
+{% endif %}
+</head>
+<body>
+
+  <div class="jump-to-sticky">
+    <label for="jump-to">Перейти к эндпоинту:</label>
+    <select id="jump-to" onchange="document.getElementById('section-' + this.value)?.scrollIntoView({behavior: 'smooth', block: 'start'})">
+      <option value="">— выбрать —</option>
+      {# Подписи у двух разных операций легко совпадают — их придумывает человек. Операция в
+         строке выбора нужна затем, чтобы в списке не стояло два одинаковых пункта. #}
+      {% for group_key, group in endpoint_groups.items() %}
+      <option value="{{ group.id }}">{{ group.name }}{% if group.operation and group.operation != group.name %} — {{ group.operation }}{% endif %}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  {% if not plotly_js %}
+  <div class="notice">
+    Графиков нет: plotly.js не вшит в отчёт. Ставить его из сети отчёт не будет —
+    установите <code>partest-load[report]</code> либо укажите файл plotly.js при сборке.
+    Числа в таблицах посчитаны полностью.
+  </div>
+  {% endif %}
+
+  <div class="container">
+    <h1>Нагрузочное тестирование</h1>
+    <div class="subtitle">Последние прогоны по профилям (обновлено: {{ now | datetimeformat("%Y-%m-%d %H:%M:%S") }})</div>
+
+    {% for group_key, group in endpoint_groups.items() %}
+    <div class="endpoint-section" id="section-{{ group.id }}">
+      <div class="endpoint-header">
+        <h2>{{ group.name }}</h2>
+        {# Операция — то, чем прогон опознаётся и сводится с картой; имя выше — подпись. #}
+        {% if group.operation %}<div class="endpoint-operation">{{ group.operation }}</div>{% endif %}
+      </div>
+
+      <div class="cards-grid">
+        {% for run in group.runs %}
+          {% include "card.html.j2" %}
+        {% endfor %}
+      </div>
+
+      {% if group.summary %}
+      <div class="endpoint-summary">
+        <h3>Общее состояние эндпоинта</h3>
+        <div class="status-light {{ group.summary.status_class }}">
+          <span class="dot"></span> {{ group.summary.status_text }}
+        </div>
+        <ul class="summary-facts">
+          <li>Самая стабильная нагрузка: <strong>{{ group.summary.best_profile }}</strong> — p95 {{ group.summary.best_p95 }} мс, успешных {{ group.summary.best_success }}%</li>
+          <li>Максимальный достигнутый RPS: <strong>{{ group.summary.max_rps }}</strong> ({{ group.summary.max_rps_profile }})</li>
+          {% if group.summary.saturation %}
+          <li>Точка насыщения: <strong>{{ group.summary.saturation }}</strong> одновременных запросов</li>
+          {% endif %}
+          <li>Худший сценарий: <strong>{{ group.summary.worst_profile }}</strong> — доля ошибок {{ group.summary.worst_error }}%, деградация {{ group.summary.worst_degradation }}</li>
+        </ul>
+        <div class="recommendation">
+          {{ group.summary.recommendation_text }}
+        </div>
+      </div>
+      {% endif %}
+
+    </div>
+    {% endfor %}
+  </div>
+
+  {% for group_key, group in endpoint_groups.items() %}
+    {% for run in group.runs %}
+    <div id="modal-{{ run.run_id }}" class="modal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>{{ run.profile_name }} — {{ run.timestamp | datetimeformat("%H:%M %d.%m.%Y") }}</h2>
+          <span class="modal-close" onclick="closeModal('{{ run.run_id }}')">×</span>
+        </div>
+
+        <div class="profile-settings" style="padding: 1rem 1.5rem; background: #f8fafc; border-radius: 8px; margin: 0 1.5rem 1.5rem;">
+          <h3 style="margin-top: 0; color: #475569;">Настройки профиля</h3>
+
+          {% if run.profile_config.warning %}
+            <p style="color: #dc2626; font-style: italic;">
+              {{ run.profile_config.warning }}
+            </p>
+          {% else %}
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;">
+              {% if run.profile_config.name %}
+              <div>
+                <strong>Название</strong><br>
+                <span>{{ run.profile_config.name }}</span>
+              </div>
+              {% endif %}
+
+              <div>
+                <strong>Тип</strong><br>
+                <span style="text-transform: capitalize;">{{ run.profile_config.type }}</span>
+              </div>
+
+              {% if run.profile_config.duration_sec %}
+              <div>
+                <strong>Длительность</strong><br>
+                <span>{{ run.profile_config.duration_sec }} сек
+                  {% if run.profile_config.duration_sec >= 3600 %}
+                    ({{ (run.profile_config.duration_sec / 3600) | round(1) }} ч)
+                  {% elif run.profile_config.duration_sec >= 60 %}
+                    ({{ (run.profile_config.duration_sec / 60) | round(1) }} мин)
+                  {% endif %}
+                </span>
+              </div>
+              {% endif %}
+
+              {% if run.profile_config.target_concurrency %}
+              <div>
+                <strong>Параллельность</strong><br>
+                <span>{{ run.profile_config.target_concurrency }}</span>
+              </div>
+              {% endif %}
+
+              {% if run.profile_config.workers %}
+              <div>
+                <strong>Воркеров</strong><br>
+                <span>{{ run.profile_config.workers }}</span>
+              </div>
+              {% endif %}
+
+              {% if run.profile_config.ramp_up_sec %}
+              <div>
+                <strong>Разгон</strong><br>
+                <span>{{ run.profile_config.ramp_up_sec }} сек</span>
+              </div>
+              {% endif %}
+
+              {# Порог читает только stress: у остальных профилей он разбирается и не действует.
+   Печатать его везде значило обещать читателю остановку, которой не будет. #}
+              {% if run.profile_config.stop_on_error_rate and run.profile_config.profile_type == 'stress' %}
+              <div>
+                <strong>Остановка при доле ошибок</strong><br>
+                <span>&gt; {{ run.profile_config.stop_on_error_rate }}%</span>
+              </div>
+              {% endif %}
+
+              {% if run.profile_config.phases %}
+              <div style="grid-column: 1 / -1;">
+                <strong>Фазы:</strong>
+                <ul style="margin: 0.3rem 0 0 1.2rem; padding-left: 0; list-style-type: disc;">
+                  {% for phase in run.profile_config.phases %}
+                  <li>
+                    {{ phase.name | default("фаза") }}:
+                    {{ phase.duration_sec }} сек,
+                    параллельность {{ phase.target_concurrency | default(phase.end_concurrency | default('?')) }}
+                  </li>
+                  {% endfor %}
+                </ul>
+              </div>
+              {% endif %}
+
+              {% if run.profile_config.initial_concurrency or run.profile_config.max_concurrency %}
+              <div style="grid-column: 1 / -1;">
+                <strong>Параметры stress:</strong><br>
+                начало: {{ run.profile_config.initial_concurrency | default('—') }},
+                предел: {{ run.profile_config.max_concurrency | default('—') }},
+                шаг: {{ run.profile_config.ramp_up_step | default('—') }}
+              </div>
+              {% endif %}
+            </div>
+          {% endif %}
+        </div>
+
+        <div style="padding: 1.5rem;">
+          {% include "modal_full_report.html.j2" %}
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  {% endfor %}
+
+  <script>
+    function openModal(runId) {
+      document.getElementById('modal-' + runId).style.display = 'flex';
+      if (typeof Plotly === 'undefined') return;
+      setTimeout(() => {
+        const plots = document.querySelectorAll(
+          '#modal-' + runId + ' div[id^="plotly-chart-"], #modal-' + runId + ' div[id^="error-heatmap-"]');
+        plots.forEach(div => { if (div.data) Plotly.Plots.resize(div); });
+      }, 150);
+    }
+
+    function closeModal(runId) {
+      document.getElementById('modal-' + runId).style.display = 'none';
+    }
+
+    window.onclick = function(event) {
+      if (event.target.classList.contains('modal')) {
+        event.target.style.display = 'none';
+      }
+    }
+  </script>
+
+</body>
+</html>

@@ -17,6 +17,7 @@ audience: agent
 | Где сейчас репозиторий, что дальше | [[status]] |
 | Почему нагрузка задаётся временем, а не числом запросов | [[concepts/time-based-load]] |
 | Что вообще есть в пакете и где лежит | [[components/overview]] |
+| Чем прогон опознаётся и почему слаг не подходит | [[decisions/operation-is-identity]] |
 | Что берётся из partest и почему не пишется своё | [[decisions/reuse-partest]] |
 | Спорные предложения, ещё не решённые | [[proposals]] |
 
@@ -36,6 +37,7 @@ audience: agent
 
 | Страница | Решение |
 |---|---|
+| [[decisions/operation-is-identity]] | прогон опознаётся операцией «МЕТОД /путь», слаг — подпись |
 | [[decisions/reuse-partest]] | авторизация, контракт и редактирование секретов берутся из partest |
 
 ## Вне wiki
