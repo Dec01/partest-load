@@ -2,7 +2,7 @@
 title: Статус partest-load
 status: current
 verified: 2026-09-23
-sources: [partest_load/__init__.py, CHANGELOG.md]
+sources: [partest_load/__init__.py, CHANGELOG.md, setup.py]
 audience: agent
 allow_version_literals: true
 ---
@@ -35,7 +35,7 @@ allow_version_literals: true
 | `operation.py` | операция прогона «МЕТОД /путь» и её ключ в имени файла |
 | `storage/` | схема прогона (формат `2.0`) и хранилище, ключуемое операцией |
 | `reporting/` | данные графиков, сборка дашборда, три шаблона Jinja2 |
-| `cli.py` | точка входа `partest-load`, на которую ссылается `project.scripts` |
+| `cli.py` | точка входа `partest-load`, на которую ссылается `console_scripts` |
 
 Тесты есть, сети и стенда не требуют: метрики, профили, расписание каждого движка, критерий
 обрыва stress, хранилище, сборка дашборда.
@@ -47,7 +47,7 @@ allow_version_literals: true
 - **выгрузки артефакта `load.profile`** — модуля `artifacts.py` нет. Результат прогона читает
   только дашборд, внешний потребитель артефактов пока не получает ничего;
 - **переиспользования `partest`**: `TokenManager`, `http.Config`, `openapi`, `path_match`,
-  `redact` не подключены. Зависимость в `pyproject.toml` объявлена, но кодом не используется;
+  `redact` не подключены. Зависимость в `setup.py` объявлена, но кодом не используется;
 - **редактирования секретов через `partest.redact`**: снимок конфигурации прогона оставляет
   имена заголовков и метки вариантов тела, а значения не берёт (`EndpointConfig.snapshot()`),
   но это своя простая мера, а не общее для семейства редактирование;
@@ -67,14 +67,16 @@ allow_version_literals: true
 
 ## Что мешает выпуску
 
-Ничего, что решалось бы в этом репозитории. Дистрибутив собирается (колесо и sdist),
-`twine check` зелёный, колесо ставится в чистое окружение, `partest-load --help` и
-`--dry-run` работают из установленного пакета. В колесе — пакет с шаблонами отчёта и
-`py.typed`, в дистрибутиве — `LICENSE`, `CHANGELOG.md` и `docs/PYPI.md`; тестов, вики и
-`README.md` в нём нет.
+Ничего, что решалось бы в этом репозитории. Упаковка описана `setup.py` и `setup.cfg`, как
+у `partest` и `partest-gen`; `pyproject.toml` в репозитории нет. Собирается обеими командами
+семейства — `python -m build` и `python setup.py sdist bdist_wheel`, — `twine check` зелёный,
+колесо ставится в чистое окружение, `partest-load --help` и `--dry-run` работают из
+установленного пакета. В колесе — пакет с шаблонами отчёта и `py.typed`, в дистрибутиве —
+`LICENSE`, `CHANGELOG.md` и `docs/PYPI.md`; тестов, вики и `README.md` в нём нет. Номер версии
+объявлен литералом в `partest_load/__init__.py`, `setup.py` читает его оттуда.
 
 Осталось внешнее и не наше: удалённого репозитория `github.com/Dec01/partest-load` ещё нет,
-а на него ссылаются `project.urls`. Выкладывает владелец: выпуск на PyPI — его решение,
+а на него ссылаются `project_urls`. Выкладывает владелец: выпуск на PyPI — его решение,
 не агента.
 
 ## Открытые вопросы

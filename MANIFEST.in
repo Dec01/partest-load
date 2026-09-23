@@ -19,4 +19,5 @@ prune .github
 exclude README.md
 exclude AGENTS.md
 exclude CLAUDE.md
+exclude pytest.ini
 exclude .private-names
