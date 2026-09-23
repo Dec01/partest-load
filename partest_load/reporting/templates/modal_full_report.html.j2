@@ -1,0 +1,153 @@
+{# Подробный отчёт по одному прогону. Вставляется в модальное окно дашборда.
+
+   Два отличия от прототипа. Разбивка по размеру ответа проверялась как `degradation_by_size`
+   — имя, которого в контексте не было ни разу: таблица не рендерилась никогда. Здесь она
+   берётся из самого прогона. И графики рисуются только если plotly.js вшит в файл: из сети
+   отчёт ничего не тянет, а `Plotly.newPlot` без библиотеки — просто ошибка в консоли. #}
+<div class="detailed-metrics">
+  <h3>Ключевые метрики</h3>
+  <table class="metrics-table">
+      <tr><th>Метрика</th><th>Значение</th><th>Разница с прошлым прогоном</th><th>Комментарий</th></tr>
+      <tr>
+        <td>RPS (реальный)</td>
+        <td>{{ run.metrics.real_rps | round(1) }}</td>
+        <td>
+          {% if run.delta.rps %}
+            <span class="{{ 'up' if run.delta.rps > 0 else 'down' }}">
+              {{ '↑' if run.delta.rps > 0 else '↓' }} {{ run.delta.rps | abs | round(1) }}
+            </span>
+          {% endif %}
+        </td>
+        <td>всего запросов: {{ run.metrics.total_requests }}</td>
+      </tr>
+      <tr>
+        <td>p50 / p95 / p99</td>
+        <td>{{ run.metrics.p50_ms | round(0) }} / {{ run.metrics.p95_ms | round(0) }} / {{ run.metrics.p99_ms | round(0) }} мс</td>
+        <td>
+          {% if run.delta.p95 %}
+            <span class="{{ 'up bad' if run.delta.p95 > 0 else 'down good' }}">
+              {{ '↑' if run.delta.p95 > 0 else '↓' }} {{ run.delta.p95 | abs | round(0) }} (p95)
+            </span>
+          {% endif %}
+        </td>
+        <td>максимум: {{ run.metrics.max_latency_ms | default(0) | round(0) }} мс</td>
+      </tr>
+      <tr>
+        <td>Доля успешных</td>
+        <td>{{ (run.metrics.success_rate * 100) | round(1) }}%</td>
+        <td>—</td>
+        <td>успешных: {{ run.metrics.success_count }}</td>
+      </tr>
+      <tr>
+        <td>Средний размер ответа</td>
+        <td>{{ run.metrics.avg_response_mb | round(2) }} МБ</td>
+        <td>—</td>
+        <td>максимум: {{ run.metrics.max_response_mb | round(2) }} МБ</td>
+      </tr>
+      <tr>
+        <td>Ошибки</td>
+        <td>{{ run.metrics.error_rate_pct | round(1) }}%</td>
+        <td>
+          {% if run.delta.error_rate %}
+            <span class="{{ 'up bad' if run.delta.error_rate > 0 else 'down good' }}">
+              {{ '↑' if run.delta.error_rate > 0 else '↓' }} {{ run.delta.error_rate | abs | round(1) }}
+            </span>
+          {% endif %}
+        </td>
+        <td>
+          {% if run.metrics.errors_by_type %}
+            {% for etype, count in run.metrics.errors_by_type.items() | sort %}{{ etype }}: {{ count }}{% if not loop.last %}, {% endif %}{% endfor %}
+          {% else %}—{% endif %}
+        </td>
+      </tr>
+      <tr>
+        <td>Деградация p95</td>
+        <td>{{ run.metrics.degradation_slope_pct_per_min | default(0) | round(1) }}% в минуту</td>
+        <td>—</td>
+        <td>{{ run.metrics.degradation_status | default('—') }}</td>
+      </tr>
+      {# Проверка на истинность, а не `is not none`: метрики приходят словарём из JSON,
+         и отсутствующий ключ даёт Undefined, который `is not none` считает значением. #}
+      {% if run.metrics.time_to_first_error_sec %}
+      <tr>
+        <td>Время до первой ошибки</td>
+        <td>{{ run.metrics.time_to_first_error_sec | round(1) }} сек</td>
+        <td>—</td>
+        <td>от первого запроса прогона</td>
+      </tr>
+      {% endif %}
+    </table>
+</div>
+
+<div class="section" style="margin: 2rem 0;">
+  <h3>Ошибки по типу и времени</h3>
+{% if not plotly_js %}
+  <p class="no-data">Графики не вшиты в отчёт — см. предупреждение наверху страницы</p>
+{% elif run.error_heatmap_json != "{}" %}
+  <div id="error-heatmap-{{ run.run_id }}" style="width:100%; height:520px;"></div>
+  <script>
+    (function () {
+      const figure = {{ run.error_heatmap_json | safe }};
+      Plotly.newPlot('error-heatmap-{{ run.run_id }}', figure.data, figure.layout,
+                     {responsive: true, displayModeBar: false});
+    })();
+  </script>
+{% else %}
+  <p class="no-data">Ошибок для разбора нет (или сырые результаты не сохранены)</p>
+{% endif %}
+</div>
+
+<div class="section" style="margin: 2rem 0;">
+  <h3>Нагрузка во времени</h3>
+{% if not plotly_js %}
+  <p class="no-data">Графики не вшиты в отчёт — см. предупреждение наверху страницы</p>
+{% elif run.plotly_json != "{}" %}
+  <div id="plotly-chart-{{ run.run_id }}" style="width:100%; height:620px;"></div>
+  <script>
+    (function () {
+      const figure = {{ run.plotly_json | safe }};
+      Plotly.newPlot('plotly-chart-{{ run.run_id }}', figure.data, figure.layout, figure.config);
+    })();
+  </script>
+{% else %}
+  <p class="no-data">Графиков нет: сырые результаты в прогоне не сохранены</p>
+{% endif %}
+</div>
+
+{% if run.degradation_by_size %}
+<div class="section" style="margin: 2rem 0;">
+  <h3>Как просели ответы внутри диапазона размеров</h3>
+  <table class="metrics-table">
+    <thead>
+      <tr><th>Диапазон</th><th>Запросов</th><th>Первая треть прогона, мс</th><th>Последняя треть прогона, мс</th><th>Разница, мс</th></tr>
+    </thead>
+    <tbody>
+      {% for size, data in run.degradation_by_size.items() | sort %}
+      <tr>
+        <td>{{ size }}</td>
+        <td>{{ data.count }}</td>
+        <td>{{ data.first_avg_ms }}</td>
+        <td>{{ data.last_avg_ms }}</td>
+        <td style="color: {% if data.delta_ms > 0 %}#dc2626{% else %}#16a34a{% endif %}">{{ '+' if data.delta_ms > 0 else '' }}{{ data.delta_ms }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<style>
+  .detailed-metrics { margin-bottom: 2rem; }
+  .metrics-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .metrics-table th, .metrics-table td {
+    border: 1px solid #e2e8f0;
+    padding: 0.8rem 1rem;
+    text-align: left;
+  }
+  .metrics-table th { background: #f1f5f9; font-weight: 600; }
+  .no-data { color: #64748b; font-style: italic; text-align: center; }
+  .section { border-top: 1px solid #e2e8f0; padding-top: 1.5rem; }
+</style>

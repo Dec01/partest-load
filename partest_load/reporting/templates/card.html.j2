@@ -1,0 +1,63 @@
+{# Карточка одного прогона. Пороги «хорошо / настороже / плохо» — оформление отчёта,
+   а не свойство системы: у каждого стенда своё «нормально». Числа перенесены из прототипа. #}
+<div class="card">
+  <div class="card-header">
+    {{ run.profile_name }}
+    <span class="timestamp">{{ run.timestamp | datetimeformat('%H:%M %d.%m.%Y') }}</span>
+  </div>
+
+  <div class="metrics-grid">
+    <div class="metric">
+      <span class="label">RPS</span>
+      <div class="value {{ 'good' if run.metrics.real_rps >= 50 else 'warn' if run.metrics.real_rps >= 20 else 'bad' }}">
+        {{ run.metrics.real_rps | round(1) }}
+        {% if run.delta.rps %}
+          <span class="delta {{ 'up' if run.delta.rps > 0 else 'down' }}"><br/>
+            {{ '↑' if run.delta.rps > 0 else '↓' }} {{ run.delta.rps | abs | round(1) }}
+          </span>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="metric">
+      <span class="label">p95</span>
+      <div class="value {{ 'good' if run.metrics.p95_ms <= 2500 else 'warn' if run.metrics.p95_ms <= 7000 else 'bad' }}">
+        {{ run.metrics.p95_ms | round(0) }} мс
+        {% if run.delta.p95 %}
+          <span class="delta {{ 'up bad' if run.delta.p95 > 0 else 'down good' }}"><br/>
+            {{ '↑' if run.delta.p95 > 0 else '↓' }} {{ run.delta.p95 | abs | round(0) }}
+          </span>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="metric">
+      <span class="label">Успешных</span>
+      <div class="value good">
+        {{ (run.metrics.success_rate * 100) | float | round(1) }}%
+      </div>
+    </div>
+
+    <div class="metric">
+      <span class="label">Ошибок</span>
+      <div class="value {{ 'bad' if run.metrics.error_rate_pct >= 5 else 'warn' if run.metrics.error_rate_pct >= 1 else 'good' }}">
+        {{ run.metrics.error_rate_pct | round(1) }}%
+        {% if run.delta.error_rate %}
+          <span class="delta {{ 'up bad' if run.delta.error_rate > 0 else 'down good' }}"><br/>
+            {{ '↑' if run.delta.error_rate > 0 else '↓' }} {{ run.delta.error_rate | abs | round(1) }}
+          </span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {% if run.metrics.saturation_point_concurrency %}
+  <div class="saturation">
+    Насыщение ≈ <strong>{{ run.metrics.saturation_point_concurrency }}</strong> одновременных запросов
+  </div>
+  {% endif %}
+
+  <button class="btn-details" onclick="openModal('{{ run.run_id }}')">
+    Подробнее
+  </button>
+</div>
