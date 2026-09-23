@@ -2,7 +2,7 @@
 title: Карта пакета
 status: current
 verified: 2026-09-23
-sources: [partest_load/__init__.py, pyproject.toml]
+sources: [partest_load/__init__.py, setup.py]
 audience: agent
 ---
 
@@ -79,7 +79,7 @@ plotly.js вшивается в файл: из установленного па
 условиях; это сторожится тестом, а не договорённостью.
 
 Шаблоны дашборда лежат в `reporting/templates/` и объявлены данными пакета в
-`pyproject.toml`. Они не код, и теряются тихо: пакет устанавливается целиком, а отчёт падает
+`setup.py` (`package_data`). Они не код, и теряются тихо: пакет устанавливается целиком, а отчёт падает
 у потребителя после прогона — в самый дорогой момент.
 
 Тяжёлые зависимости отчёта (`numpy`, `pandas`, `plotly`, `Jinja2`) вынесены в extra `report`:

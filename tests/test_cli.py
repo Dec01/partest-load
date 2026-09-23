@@ -1,8 +1,8 @@
 """Точка входа.
 
-Объявленная в `pyproject.toml` команда, которая ни во что не ведёт, хуже отсутствующей:
+Объявленная в `setup.py` команда, которая ни во что не ведёт, хуже отсутствующей:
 установка пакета даёт рабочий на вид `partest-load`, падающий при первом запуске. Поэтому
-первым тестом проверяется сама запись `project.scripts`, а не её содержимое.
+первым тестом проверяется сама запись `console_scripts`, а не её содержимое.
 
 Второе, что сторожится здесь, — «нагрузка только по явной команде»: ни импорт, ни разбор
 конфигурации, ни `--dry-run` не отправляют ни одного запроса. Тесты обходятся без сети
@@ -20,7 +20,7 @@ import pytest
 from partest_load.cli import build_parser, main, print_summary
 from partest_load.storage.schema import AggregatedMetrics
 
-PYPROJECT = "pyproject.toml"
+SETUP = "setup.py"
 ENDPOINTS_YAML = """
 items:
   name: Каталог позиций
@@ -44,11 +44,11 @@ ramp_down_sec: 0
 
 
 def test_declared_console_script_resolves(repo_root):
-    """Запись `project.scripts` ведёт в существующую функцию."""
-    text = (repo_root / PYPROJECT).read_text(encoding="utf-8")
-    entry = re.search(r"^partest-load\s*=\s*\"([^\"]+)\"", text, re.MULTILINE)
+    """Запись `console_scripts` ведёт в существующую функцию."""
+    text = (repo_root / SETUP).read_text(encoding="utf-8")
+    entry = re.search(r"\"partest-load=([^\"]+)\"", text)
 
-    assert entry, "в pyproject.toml нет точки входа partest-load"
+    assert entry, "в setup.py нет точки входа partest-load"
     module_name, _, attr = entry.group(1).partition(":")
     module = importlib.import_module(module_name)
 
@@ -61,10 +61,10 @@ def test_report_templates_are_declared_as_package_data(repo_root):
     Без этой строки колесо собирается без `reporting/templates`, и отчёт падает у
     потребителя — после прогона, то есть в самый дорогой момент.
     """
-    text = (repo_root / PYPROJECT).read_text(encoding="utf-8")
+    text = (repo_root / SETUP).read_text(encoding="utf-8")
 
-    assert "[tool.setuptools.package-data]" in text
-    assert re.search(r"partest_load\s*=\s*\[[^\]]*reporting/templates/\*\.j2", text)
+    assert "package_data={" in text
+    assert re.search(r"\"partest_load\"\s*:\s*\[[^\]]*reporting/templates/\*\.j2", text)
 
 
 @pytest.fixture()

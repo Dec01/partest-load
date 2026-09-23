@@ -1,8 +1,8 @@
 ---
 title: Переиспользовать partest, а не дублировать
 status: current
-verified: 2026-09-13
-sources: [pyproject.toml]
+verified: 2026-09-23
+sources: [setup.py]
 audience: maintainer
 ---
 
@@ -17,7 +17,7 @@ audience: maintainer
 ## Решение
 
 Не остаётся ничего из перечисленного. Зависимость `partest>=1.8` объявлена в
-`pyproject.toml` — **под будущую интеграцию**. Сейчас из неё не берётся ничего:
+`setup.py` (`install_requires`) — **под будущую интеграцию**. Сейчас из неё не берётся ничего:
 ни одного импорта `partest` в пакете нет. Планируется брать:
 
 | Задача | Откуда |
