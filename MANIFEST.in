@@ -1,0 +1,22 @@
+# Что уходит в дистрибутив. Всё перечисленное здесь публично навсегда.
+include partest_load/py.typed
+recursive-include partest_load/reporting/templates *.j2
+include LICENSE
+include CHANGELOG.md
+# Описание страницы пакета. В отличие от соседей файл оставлен в дистрибутиве намеренно:
+# без него колесо, собранное из sdist, не собирается — `readme` указывает именно сюда.
+include docs/PYPI.md
+
+# Намеренно НЕ уходит:
+#   tests/      — писаны на рабочую копию, из sdist всё равно не прошли бы
+#   README.md   — обращён к репозиторию: отсылает к docs/wiki/ и AGENTS.md, которых в
+#                 дистрибутиве нет. Страница на PyPI берётся из docs/PYPI.md
+#   docs/wiki/  — вики написана для тех, кто сопровождает репозиторий
+prune tests
+prune docs/wiki
+prune .idea
+prune .github
+exclude README.md
+exclude AGENTS.md
+exclude CLAUDE.md
+exclude .private-names
