@@ -20,7 +20,7 @@ def test_the_operation_is_method_and_path():
     assert normalize_operation("get", "v1/items") == "GET /v1/items"
     assert normalize_operation("GET", "/v1/items") == "GET /v1/items"
     assert normalize_operation("post", "") == "POST /"
-    # Шаблон пути не переписывается: `{id}` — часть узла графа, а не значение.
+    # Шаблон пути не переписывается: `{id}` — часть опознания эндпоинта, а не значение.
     assert normalize_operation("GET", "/v1/items/{id}") == "GET /v1/items/{id}"
 
 

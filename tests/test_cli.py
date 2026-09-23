@@ -98,7 +98,7 @@ def test_dry_run_sends_nothing(tmp_path, config_files, capsys):
     out = capsys.readouterr().out
     assert "ни один запрос не отправлен" in out
     assert "https://service.invalid/v1/items" in out
-    # Операция видна ещё до нагрузки: именно ею прогон опознается в раскладке и в карте, и
+    # Операция видна ещё до нагрузки: именно ею прогон опознаётся в раскладке и снаружи, и
     # проверять её задним числом, по имени каталога с хешем, вдвое дороже.
     assert "операция прогона: POST /v1/items" in out
 
