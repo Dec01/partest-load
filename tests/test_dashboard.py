@@ -1,8 +1,13 @@
 """Сборка дашборда и шаблоны отчёта.
 
-Главное, что здесь сторожится, — красная линия про закрытый контур: в собранном файле не
-должно остаться ни одной ссылки наружу. Прототип тянул plotly и иконочный шрифт с CDN, и
+Главное, что здесь сторожится, — красная линия про закрытый контур: открытый отчёт не
+должен отправить ни одного запроса. Прототип тянул plotly и иконочный шрифт с CDN, и
 в контуре заказчика такой отчёт открывается пустой страницей.
+
+Запрещена именно **подгрузка** ресурса, а не всякое упоминание внешнего адреса: разницу
+разбирает докстринг `test_the_report_asks_the_network_for_nothing`. Проверка держится на
+том, что plotly.js вшит; в окружении без него она пуста, поэтому отсутствие бандла здесь —
+падение, а не пропуск.
 """
 
 from __future__ import annotations
@@ -15,17 +20,37 @@ import pytest
 pytest.importorskip("jinja2", reason="отчёт живёт за extra report")
 pytest.importorskip("pandas", reason="отчёт живёт за extra report")
 
+from partest_load.reporting import generator  # noqa: E402
 from partest_load.reporting.generator import (  # noqa: E402
     TEMPLATES_DIR,
     build_summary,
     collect_endpoint_groups,
     degradation_by_size,
     generate_dashboard,
+    plotly_bundle,
 )
 from partest_load.storage.result_store import save_run_results  # noqa: E402
 from partest_load.storage.schema import AggregatedMetrics  # noqa: E402
 
-EXTERNAL_URL = re.compile(r"(?:src|href)\s*=\s*[\"']\s*(?:https?:)?//", re.IGNORECASE)
+# Места, в которых браузер **идёт за ресурсом**. Отчёт — один файл: любая из этих записей
+# означает, что при открытии он полезет наружу либо за соседний файл, которого рядом может
+# не оказаться. Адрес здесь не важен — важна сама позиция.
+FETCHES = (
+    ("src=", re.compile(r"\bsrc\s*=", re.IGNORECASE)),
+    ("<link>", re.compile(r"<link\b", re.IGNORECASE)),
+    ("<iframe>", re.compile(r"<iframe\b", re.IGNORECASE)),
+    ("@import", re.compile(r"@import\b", re.IGNORECASE)),
+    ("@font-face", re.compile(r"@font-face\b", re.IGNORECASE)),
+    ("url(...)", re.compile(r"\burl\(\s*[\"']?(?!data:)", re.IGNORECASE)),
+    ("fetch()", re.compile(r"\bfetch\s*\(")),
+    ("XMLHttpRequest", re.compile(r"\bXMLHttpRequest\b")),
+    ("importScripts()", re.compile(r"\bimportScripts\s*\(")),
+)
+
+# Типы следов, которые plotly рисует, ничего не спрашивая у сети. Всё картографическое
+# (`scattermap`, `choropleth`, `densitymap`, `scattergeo` и родня) тянет тайлы, стили и
+# топологию с чужих адресов — см. докстринг `test_the_report_asks_the_network_for_nothing`.
+LOCAL_TRACE_TYPES = {"bar", "scatter", "scattergl", "heatmap", "box", "histogram", "pie"}
 
 
 def _metrics(**over) -> AggregatedMetrics:
@@ -79,29 +104,107 @@ def test_all_three_templates_are_present():
     assert names == {"dashboard.html.j2", "card.html.j2", "modal_full_report.html.j2"}
 
 
-def test_dashboard_has_no_link_to_the_outside_world(results_root, tmp_path):
+def test_plotly_is_embedded_and_not_linked(results_root, tmp_path):
+    """Библиотека едет внутри файла, а не по адресу.
+
+    Отчёт уносят из контура — в письмо, в тикет, на флешку — и открывают там, где сети
+    нет. `<script src="...plotly...">` в таком файле означает пустую страницу.
+
+    Здесь же закрыта дыра, из-за которой проверка автономности два месяца была пустой:
+    в окружении без `plotly` библиотека в отчёт не вшивалась, искать в нём было нечего, и
+    тест зеленел, ничего не проверив. Теперь отсутствие бандла — это падение с прямым
+    указанием, чего не хватает в окружении, а не тихий зелёный.
+    """
+    bundle = plotly_bundle()
+    assert bundle is not None, (
+        "в этом окружении нет plotly, и проверять автономность отчёта не на чем: "
+        "поставьте pip install -e \".[dev]\" — иначе проверка пуста, а не пройдена"
+    )
+
     out = generate_dashboard(results_root, tmp_path / "out" / "dashboard.html")
-
     html = out.read_text(encoding="utf-8")
-    assert EXTERNAL_URL.search(html) is None
-    assert "cdn." not in html
-    assert "cdnjs" not in html
-    assert "fonts.googleapis" not in html
+
+    assert bundle in html, "plotly.js не вшит в отчёт целиком"
+    assert "Plotly.newPlot" in html
+    assert re.search(r"<script[^>]*\bsrc\s*=", html, re.IGNORECASE) is None, (
+        "в отчёте есть <script src=...> — код подгружается, а не лежит в файле"
+    )
+    assert "Графиков нет" not in html
 
 
-def test_dashboard_says_so_when_charts_are_missing(results_root, tmp_path):
+def test_the_report_asks_the_network_for_nothing(results_root, tmp_path):
+    """Открытый отчёт не отправляет ни одного запроса — ни наружу, ни за соседний файл.
+
+    **Подгрузка и ссылка — разные вещи, и запрещена только первая.** Браузер идёт за
+    ресурсом сам, без человека, в `src=`, `<link>`, `<iframe>`, `@import`, `@font-face`,
+    `url(...)`, `fetch()`, `XMLHttpRequest`, `importScripts()`. Этого в отчёте нет нигде.
+    `href` у `<a>` — приглашение кликнуть: пока по нему не щёлкнули, наружу не уходит
+    ничего, и в закрытом контуре такой отчёт открывается полностью.
+
+    Поэтому во вшитом `plotly.js` допустимы его собственные ссылки — логотип plotly в
+    панели инструментов, атрибуция ESRI и OpenStreetMap в определениях карт. Предыдущая
+    версия проверки искала `src=` и `href=` одним выражением, находила эти шесть ссылок и
+    требовала бы выбросить кусок чужой библиотеки ради строки, которая ничего не грузит.
+
+    Вшитый бандл вырезан из проверяемого текста намеренно: это чужой код целиком, и в его
+    картографической части есть настоящие подгрузки (иконки с `cdn.jsdelivr.net`, стили
+    подложек с `basemaps.cartocdn.com`, топология с `cdn.plot.ly`). Они спят: ни один
+    график отчёта не картографический, и это отдельно сторожит
+    `test_charts_use_only_traces_that_render_locally`. Всё, что вне бандла, — наше, и
+    там запрещено любое обращение за ресурсом, хоть внешнее, хоть соседним файлом.
+    """
+    out = generate_dashboard(results_root, tmp_path / "out" / "dashboard.html")
+    html = out.read_text(encoding="utf-8")
+
+    bundle = plotly_bundle()
+    assert bundle and bundle in html, "без вшитого бандла эта проверка снова пуста"
+    ours = html.replace(bundle, "")
+
+    found = {name: rx.search(ours).group(0) for name, rx in FETCHES if rx.search(ours)}
+
+    assert not found, f"отчёт идёт за ресурсом: {found}"
+    assert "cdn." not in ours
+    assert "cdnjs" not in ours
+    assert "fonts.googleapis" not in ours
+
+
+def test_charts_use_only_traces_that_render_locally(results_root):
+    """Ни один график не картографический.
+
+    Во вшитом plotly.js лежит код карт, а он адреса подложек и иконок действительно
+    запрашивает. Единственное, что держит эти строки мёртвыми, — то, что отчёт таких
+    следов не строит. Появится картографический график — отчёт начнёт ходить в сеть, и
+    заметить это по тексту файла уже не получится.
+    """
+    groups = collect_endpoint_groups(results_root)
+    figures = [json.loads(run[key])
+               for group in groups.values() for run in group["runs"]
+               for key in ("plotly_json", "error_heatmap_json")]
+
+    types = {trace.get("type") for figure in figures for trace in figure.get("data", [])}
+
+    assert types, "в прогоне не оказалось ни одного графика — проверять нечего"
+    assert types <= LOCAL_TRACE_TYPES, f"следы, которым нужна сеть: {types - LOCAL_TRACE_TYPES}"
+
+
+def test_dashboard_says_so_when_charts_are_missing(results_root, tmp_path, monkeypatch):
     """Без plotly.js отчёт собирается с таблицами и честно пишет, почему нет графиков.
 
     Подставить ссылку на CDN вместо предупреждения — самое естественное «исправление»
     этого места, и именно оно запрещено.
+
+    Отсутствие бандла подставляется, а не берётся из окружения: `plotly_js=None` значит
+    «возьми из установленного пакета», и там, где `plotly` стоит, этот тест пропускался —
+    то есть проверял свою ветку только в окружении, в котором отчёт всё равно неполон.
     """
-    out = generate_dashboard(results_root, tmp_path / "dashboard.html", plotly_js=None)
+    monkeypatch.setattr(generator, "plotly_bundle", lambda *_a, **_kw: None)
+
+    out = generate_dashboard(results_root, tmp_path / "dashboard.html")
     html = out.read_text(encoding="utf-8")
 
-    if "Plotly.newPlot" in html:
-        pytest.skip("plotly установлен, библиотека вшита в отчёт")
     assert "Графиков нет" in html
     assert "Plotly.newPlot" not in html
+    assert re.search(r"<script[^>]*\bsrc\s*=", html, re.IGNORECASE) is None
 
 
 def test_embedded_plotly_is_not_escaped(results_root, tmp_path):
