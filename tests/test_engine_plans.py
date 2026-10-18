@@ -178,16 +178,32 @@ def test_batch_is_one_phase_with_the_whole_budget(endpoint):
     assert (phases[0].concurrency, phases[0].duration_sec) == (30, 600)
 
 
+def test_batch_list_is_every_variant_repeated_repeat_count_times():
+    """Список batch — варианты эндпоинта, каждый `repeat_count` раз из профиля.
+
+    Раньше `repeat_count` переписывался в описание эндпоинта, где его никто не читал, и
+    batch шёл обычным потоком до конца `duration_sec`. Сторожится размер списка в плане:
+    без него фаза снова станет потоком.
+    """
+    three = EndpointConfig(name="demo", base_url="https://service.invalid",
+                           path="/v1/items/{id}", method="GET",
+                           payloads=[{"path_params": {"id": i}} for i in (1, 2, 3)])
+    phases = plan_of(BatchEngine, BATCH, three)
+
+    assert phases[0].requests == 3 * BATCH["repeat_count"]
+
+
 def test_batch_does_not_mutate_the_endpoint_it_was_given(endpoint):
-    """Движок работает на копии описания.
+    """Движок не трогает описание эндпоинта.
 
     Прототип дописывал `batch_mode` в чужую модель через `setattr`. Один эндпоинт,
     прогнанный batch-профилем, оставался «батчевым» для всех последующих профилей в том
-    же процессе — и следующий прогон шёл не тем, чем его заказывали.
+    же процессе — и следующий прогон шёл не тем, чем его заказывали. Теперь всё, что
+    делает batch батчем, берётся из профиля.
     """
     engine = BatchEngine(parse_profile(BATCH), endpoint)
+    engine.plan()
 
-    assert engine.endpoint.batch_mode is True
-    assert engine.endpoint.repeat_count == 3
+    assert engine.endpoint is endpoint
     assert endpoint.batch_mode is False
     assert endpoint.repeat_count == 1

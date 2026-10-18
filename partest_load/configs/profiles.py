@@ -17,6 +17,8 @@ from typing import Annotated, Any, Literal, Mapping, Optional, Union
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, model_validator
 
+from .endpoints import _yaml_error_where
+
 
 class ProfileError(ValueError):
     """Профиль не разобрался: неизвестный тип, битый YAML или неверные значения."""
@@ -25,7 +27,7 @@ class ProfileError(ValueError):
 class _Profile(BaseModel):
     """Общая часть любого профиля."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     name: str = ""
     workers: int = Field(..., ge=1, description="Сколько корутин отправляют запросы")
@@ -53,7 +55,7 @@ class LinearProfile(_Profile):
 class RampPhase(BaseModel):
     """Одна фаза ramp-профиля: либо фиксированный уровень, либо перегон между уровнями."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     name: str = ""
     duration_sec: float = Field(60, gt=0.0)
@@ -149,7 +151,22 @@ def parse_profile(data: Mapping[str, Any]) -> Union[LinearProfile, RampProfile, 
     try:
         return _ADAPTER.validate_python(dict(data))
     except ValidationError as exc:
-        raise ProfileError(str(exc)) from exc
+        # Место и текст каждой ошибки, без входных значений: корневой адаптер объединения
+        # профилей `hide_input_in_errors` моделей не наследует, и `str(exc)` цитировал бы
+        # значения. Исходная ошибка не сцепляется по той же причине.
+        raise ProfileError(_errors_text(exc)) from None
+
+
+def _errors_text(exc: ValidationError) -> str:
+    lines = []
+    for error in exc.errors(include_input=False, include_url=False):
+        where = ".".join(str(part) for part in error.get("loc", ())) or "профиль"
+        if error.get("type") in ("union_tag_invalid", "union_tag_not_found"):
+            # Сообщение pydantic о теге цитирует его значение («Input tag '…'»).
+            lines.append(f"type: неизвестный тип профиля; известные: {', '.join(PROFILE_TYPES)}")
+            continue
+        lines.append(f"{where}: {error.get('msg', '')}")
+    return f"профиль не прошёл проверку ({len(lines)}): " + "; ".join(lines)
 
 
 def load_profile(path: Union[str, Path]) -> Union[LinearProfile, RampProfile, StressProfile, BatchProfile]:
@@ -158,7 +175,8 @@ def load_profile(path: Union[str, Path]) -> Union[LinearProfile, RampProfile, St
     try:
         raw = yaml.safe_load(file.read_text(encoding="utf-8"))
     except yaml.YAMLError as exc:
-        raise ProfileError(f"Не разобрался YAML профиля {file}: {exc}") from exc
+        # Только место ошибки: текст YAMLError цитирует строку файла.
+        raise ProfileError(f"Не разобрался YAML профиля {_yaml_error_where(file, exc)}") from None
     if raw is None:
         raise ProfileError(f"Профиль пуст: {file}")
     return parse_profile(raw)

@@ -12,6 +12,9 @@ atlas/
 reports/
 logs/
 
-# Локальный слой документации и закрытые имена — см. orchestra/.claude/skills/orchestra-wiki
+# Локальный слой документации и список закрытых имён: в репозиторий не уходят.
 docs/raw/
 .private-names
+
+# Хранилище вызовов partest, если тесты его создают
+.partest/

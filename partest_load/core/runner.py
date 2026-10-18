@@ -7,12 +7,15 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import List, Tuple
 
 from ..configs.endpoints import EndpointConfig
 from ..engines import ENGINES
 from .metrics import RunMetrics
+
+log = logging.getLogger(__name__)
 
 
 async def run_load_test(
@@ -23,7 +26,11 @@ async def run_load_test(
     engine_cls = ENGINES.get(profile.type)
     if engine_cls is None:
         raise ValueError(f"Неизвестный тип профиля: {profile.type}")
+    # До первой фазы: путь с неподставленным `{placeholder}` — отказ, а не нагрузка.
+    endpoint_cfg.require_path_params()
     engine = engine_cls(profile, endpoint_cfg)
+    for note in getattr(engine, "plan_notes", list)():
+        log.warning("%s", note)
 
     all_results: List[dict] = []
     events: List[dict] = []
@@ -51,6 +58,10 @@ async def run_load_test(
             "phase_duration": time.time() - phase_start_wall,
             "requests_in_phase": len(phase_results),
         })
+
+    # События движка сверх фаз: остановка по порогу (`stopped`), итог списка batch
+    # (`batch_list`). Список событий свободный, формат записи прогона от них не меняется.
+    events.extend(getattr(engine, "events", []))
 
     # Монотонные часы: шаг NTP назад на часовом прогоне давал отрицательную
     # длительность, схема объявляет её неотрицательной, и прогон терялся на записи.

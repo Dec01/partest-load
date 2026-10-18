@@ -171,8 +171,49 @@ def test_overflowed_phase_keeps_what_it_already_measured(endpoint, monkeypatch):
         count=2, concurrency=4, endpoint_cfg=endpoint, phase_duration_sec=0.2,
         phase_name="steady", rate_limit_delay=0.01))
 
-    assert len(results) == 2
+    answered_results = [r for r in results if r.get("error_type") != "cancelled"]
+    assert len(answered_results) == 2
     assert all(r["phase"] == "steady" for r in results)
+
+
+def test_requests_cut_at_the_phase_boundary_are_measured_as_failures(endpoint, monkeypatch):
+    """Запрос, снятый на выдержке фазы, — неуспешный замер, а не пропажа.
+
+    Без этого частично повисший стенд давал «0 % ошибок»: повисшие запросы просто исчезали.
+    И ни один запрос не остаётся жить после фазы — ждавшие семафора не уходят на стенд.
+    """
+    _short_drain(monkeypatch)
+    monkeypatch.setattr(worker_module, "create_http_client", lambda **_kw: _FakeClient())
+    calls = {"n": 0}
+
+    async def two_fast_then_silence(**_kwargs):
+        calls["n"] += 1
+        if calls["n"] > 2:
+            await asyncio.sleep(30)
+        return _result(calls["n"])
+
+    monkeypatch.setattr(worker_module, "make_single_request", two_fast_then_silence)
+
+    async def run():
+        results = await launch_phase_workers(
+            count=2, concurrency=4, endpoint_cfg=endpoint, phase_duration_sec=0.2,
+            phase_name="steady", rate_limit_delay=0.01)
+        leftovers = [t for t in asyncio.all_tasks() if not t.done()
+                     and t.get_coro().__name__ in {"run_worker_phase", "_tracked_request"}]
+        sent_by_then = calls["n"]
+        await asyncio.sleep(0.1)
+        return results, leftovers, sent_by_then
+
+    # Внешний предел: если снятие задач сломается, тест упадёт, а не повиснет.
+    results, leftovers, sent_by_then = asyncio.run(asyncio.wait_for(run(), timeout=20))
+
+    cancelled = [r for r in results if r.get("error_type") == "cancelled"]
+    assert cancelled, "снятые запросы исчезли без замера"
+    assert all(r["success"] is False and r["duration_sec"] >= 0 for r in cancelled)
+    assert all(r["payload"] == {"a": 1} for r in cancelled), "у снятого замера нет тела варианта"
+    assert len(cancelled) == sent_by_then - 2
+    assert leftovers == [], "запросы фазы пережили её конец"
+    assert calls["n"] == sent_by_then, "после фазы ушли новые запросы"
 
 
 def test_phase_state_tracks_the_peak_not_the_current_value():

@@ -25,12 +25,23 @@ Two runs of the same duration are comparable; two runs of the same request count
 |---|---|---|
 | `linear` | constant load | does the system hold the given level |
 | `ramp` | gradual rise to a plateau, then a decline | where degradation starts |
-| `stress` | aggressive rise until failure | saturation point and degradation slope |
-| `batch` | a finite set of requests at one level | does the system get through the list |
+| `stress` | stepwise rise of both tempo and concurrency until failure | saturation point and degradation slope |
+| `batch` | a finite list (variants × `repeat_count`) at one level | does the system get through the list |
 
-Metrics: RPS, latency percentiles, success and error share, response sizes; for `stress` also
-the saturation point and the degradation slope. Mean latency is deliberately not reported —
-an average over a long-tailed distribution hides exactly what a load run is made for.
+Metrics: RPS, latency percentiles (nearest rank — the family-wide definition), mean and
+maximum latency, success and error share, response sizes. A request still in flight when the
+phase and its drain are over is recorded as a failed `cancelled` measurement whose duration is
+a lower bound; it counts in the error share and in every latency figure; for `stress` also the saturation
+point and the degradation slope. Mean latency is recorded and plotted, but nothing is
+concluded from it: saturation and degradation are judged on percentiles, because an average
+over a long-tailed distribution hides exactly what a load run is made for.
+
+`linear`, `ramp` and `batch` stop early on `stop_on_error_rate` (and `ramp` also on
+`stop_on_p95_latency_ms`) when the profile sets them. The run's `events` end with what the
+engine decided: `stopped` (a threshold cut the run short), `breached` (a threshold was reached
+when there was nothing left to cut) and, for `batch`, `batch_list` (planned vs. answered and
+why the list was not finished); the summary prints each of them. `--dry-run` prints the plan: phases, levels and tempo. Path `{placeholders}` are filled from `path_params` — on the
+endpoint or per payload variant; a placeholder without a value is refused before any load.
 
 ## One command
 
@@ -42,8 +53,15 @@ partest-load \
   --report out/load/dashboard.html
 ```
 
-`--dry-run` parses and prints the configuration without sending a single request.
+`--dry-run` parses and prints the configuration and the plan — phases, levels, tempo and,
+for `stress`, the hold after a breach — without sending a single request.
 `--report-only` rebuilds the dashboard from runs already on disk.
+
+**`--save-raw` writes request bodies in full, up to 500 characters of the response body for
+every failed request and each request URL with its `path_params` values into the run file,
+unmasked** — `cancelled` measurements included, with their variant's body. They may hold credentials and
+personal data; the command warns when the flag is on. Do not publish or hand over such a run
+file, or the dashboard built from it, as is.
 
 **Load is sent only on an explicit command** — no warm-up on import, no background requests.
 A tool that can hit a stand by accident does not get installed.
@@ -83,10 +101,12 @@ says on the page why there are no charts.
 
 ## Early days
 
-First release. Not yet implemented, and not to be relied upon: the `load.profile` artifact
-export (`artifacts.py` does not exist — the run result is read by the dashboard only), reuse
-of `partest` for authentication, headers, the endpoint list and secret redaction, and stopping
-a run on profile thresholds for `linear` and `ramp` (only `stress` decides to abort).
+The `0.x` line: a breaking change bumps the minor number and is listed under "Сломано" in the
+changelog. Not yet implemented, and not to be relied upon: the `load.profile` artifact export
+(`artifacts.py` does not exist — the run result is read by the dashboard only), reuse of
+`partest` for authentication, headers, the endpoint list and secret redaction (so
+`--save-raw` output is not masked), environment variables in the YAML files, and switching
+TLS verification off.
 
 The run record format is `2.0`.
 

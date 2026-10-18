@@ -4,7 +4,13 @@
 нагрузки — свойства чужой системы, и их место в конфигурации потребителя.
 """
 
-from .endpoints import EndpointConfig, PayloadVariant, load_endpoints, parse_endpoints
+from .endpoints import (
+    ConfigKeyWarning,
+    EndpointConfig,
+    PayloadVariant,
+    load_endpoints,
+    parse_endpoints,
+)
 from .profiles import (
     BatchProfile,
     LinearProfile,
@@ -19,6 +25,7 @@ from .profiles import (
 
 __all__ = [
     "BatchProfile",
+    "ConfigKeyWarning",
     "EndpointConfig",
     "LinearProfile",
     "LoadProfile",

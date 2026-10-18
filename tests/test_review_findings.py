@@ -140,7 +140,7 @@ class TestSecretsDoNotReachTheArtifact:
 
         # Маркер намеренно не похож на учётные данные: тест проверяет, что из
         # снимка уходит **значение** заголовка, каким бы оно ни было, а строка
-        # в форме настоящего токена ловится стражем публикации как инцидент.
+        # в форме настоящего токена в открытом репозитории была бы инцидентом.
         marker = "sentinel-authorization-value"
         endpoint = _endpoint(headers={"Authorization": marker, "X-Api-Key": "k" * 20})
         profile = LinearProfile(type="linear", duration_sec=1, target_concurrency=1,

@@ -228,12 +228,25 @@ def _run_view(results_root: Path, profile_name: str, path: Path) -> Optional[dic
         },
         "events": data.get("events", []),
         "has_raw": bool(raw_results),
-        "plotly_json": json.dumps(plotly_config) if plotly_config else "{}",
-        "error_heatmap_json": json.dumps(heatmap_config) if heatmap_config else "{}",
+        "plotly_json": _script_json(plotly_config) if plotly_config else "{}",
+        "error_heatmap_json": _script_json(heatmap_config) if heatmap_config else "{}",
         "config_snapshot": data.get("config_snapshot", {}),
         "profile_config": profile_config,
         "degradation_by_size": degradation_by_size(raw_results),
     }
+
+
+
+def _script_json(value) -> str:
+    r"""JSON для вставки внутрь `<script>` без экранирования шаблоном.
+
+    Данные графиков берутся из файла прогона (`error_type`, подписи фаз), а файл прогона —
+    данные, не код. `json.dumps` оставляет `<`, `>` и `&` как есть, и строка `</script>` в
+    значении закрыла бы блок и открыла чужой. Эти три знака пишутся как `\u003c`, `\u003e`,
+    `\u0026` — для JavaScript та же строка, для разборщика HTML не разметка.
+    """
+    return (json.dumps(value).replace("<", r"\u003c").replace(">", r"\u003e")
+            .replace("&", r"\u0026"))
 
 
 def collect_endpoint_groups(

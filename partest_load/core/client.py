@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 import httpx
 
@@ -35,8 +35,13 @@ def create_http_client(
     http2: bool = True,
     headers: Optional[Dict[str, str]] = None,
     verify: bool = True,
+    auth: Optional[Tuple[str, str]] = None,
 ) -> httpx.AsyncClient:
-    """Клиент с лимитами пула и обязательным предельным временем."""
+    """Клиент с лимитами пула и обязательным предельным временем.
+
+    `auth` — пара для Basic-авторизации. Учётные данные передаются так, а не в адресе:
+    адрес запроса httpx пишет в свой журнал целиком.
+    """
     limits = httpx.Limits(
         max_connections=max_connections,
         max_keepalive_connections=max_connections // 2,
@@ -55,6 +60,7 @@ def create_http_client(
         timeout=httpx.Timeout(timeout, connect=timeout / 2),
         limits=limits,
         headers=default_headers,
+        auth=httpx.BasicAuth(*auth) if auth else None,
         follow_redirects=True,
         # Проверка сертификата остаётся включённой. Стенду с самоподписанным
         # сертификатом это выключает потребитель — осознанно и у себя.
@@ -82,13 +88,23 @@ async def make_single_request(
     client: httpx.AsyncClient,
     endpoint_cfg: EndpointConfig,
     payload: Optional[Dict[str, Any]] = None,
+    path_params: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Один запрос. Не бросает исключений: любая ошибка — это тоже результат замера."""
-    url = endpoint_cfg.url()
-    # Вариант с готовым адресом: профиль перебирает конечный список ссылок, а не
-    # собирает адрес из базы и пути.
-    if payload and "full_url" in payload:
-        url = payload["full_url"]
+    """Один запрос. Не бросает исключений: любая ошибка — это тоже результат замера.
+
+    Адрес собирается только из описания эндпоинта: база, путь и `path_params` варианта.
+    Тело на адрес не влияет никаким своим ключом — куда идёт нагрузка, видно из
+    конфигурации, а не из данных.
+
+    В результат и в журнал адрес попадает с подставленными значениями `path_params`;
+    учётных данных базы в нём нет — описание эндпоинта держит их отдельно
+    (`EndpointConfig.basic_auth()`), и клиент получает их Basic-авторизацией.
+    """
+    url = endpoint_cfg.url(path_params)
+    # Авторизация — на сам запрос, а не только на клиент: клиент бывает чужим (вызывающий
+    # передал свой), и учётные данные базы в адресе больше не едут.
+    creds = endpoint_cfg.basic_auth()
+    auth_kw = {"auth": httpx.BasicAuth(*creds)} if creds else {}
 
     method = endpoint_cfg.method.upper()
     timeout = endpoint_cfg.timeout
@@ -116,6 +132,7 @@ async def make_single_request(
             params=endpoint_cfg.query_params,
             headers=endpoint_cfg.headers or None,
             timeout=timeout,
+            **auth_kw,
         )
         duration = time.perf_counter() - start_perf
         size_mb = len(resp.content) / (1024 * 1024)
@@ -148,17 +165,3 @@ async def make_single_request(
 
     return result
 
-
-def payload_label(payload: Optional[Dict[str, Any]]) -> str:
-    """Краткая метка варианта запроса для отчёта.
-
-    Ключи берутся из самого тела и в пакете не перечисляются: какие поля осмысленны,
-    знает только тот, чей это контракт.
-    """
-    if payload is None:
-        return "без тела"
-    if not isinstance(payload, dict):
-        return "тело не объект"
-    parts = [f"{key}={str(value)[:16]}" for key, value in list(payload.items())[:3]
-             if not isinstance(value, (dict, list))]
-    return " | ".join(parts) or "объект без скалярных полей"

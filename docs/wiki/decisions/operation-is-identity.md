@@ -1,7 +1,7 @@
 ---
 title: Личность прогона — операция, подпись — для глаз
 status: current
-verified: 2026-09-23
+verified: 2026-10-18
 sources: [partest_load/operation.py, partest_load/storage/result_store.py, partest_load/storage/schema.py]
 audience: agent
 ---

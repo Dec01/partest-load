@@ -32,10 +32,17 @@ import asyncio
 import json
 import logging
 import sys
+import warnings
 from pathlib import Path
 from typing import Any, Dict, Optional, Sequence
 
-from .configs.endpoints import EndpointConfig, load_endpoints
+from .configs.endpoints import (
+    ConfigKeyWarning,
+    EndpointConfig,
+    load_endpoints,
+    _bare_base,
+)
+from .engines import ENGINES
 from .configs.profiles import ProfileError, load_profile
 from .core.runner import run_load_test
 from .storage.result_store import (
@@ -76,7 +83,10 @@ def build_parser() -> argparse.ArgumentParser:
                         metavar="DIR", help="Куда писать результаты прогонов")
     parser.add_argument("--save-raw", action="store_true",
                         help="Сохранить сырые результаты запросов. Без них не будет графиков, "
-                             "но на длинном прогоне это сотни мегабайт")
+                             "но на длинном прогоне это сотни мегабайт. ВНИМАНИЕ: в файл "
+                             "прогона уходят тела запросов целиком и до 500 символов тела "
+                             "ответа на каждую ошибку, без маскировки — там бывают учётные "
+                             "и персональные данные")
     parser.add_argument("--dry-run", action="store_true",
                         help="Разобрать и показать конфигурацию, ничего не отправлять")
     parser.add_argument("--report", type=Path, metavar="FILE",
@@ -98,12 +108,72 @@ def _profile_name(args: argparse.Namespace) -> str:
     return args.profile_name or args.profile.stem
 
 
-def print_summary(metrics: AggregatedMetrics, out=None) -> None:
+# Печатается при `--save-raw` до нагрузки, а не после: узнавать о том, что в файле лежат
+# чужие данные, полезно до того, как он появился. Маскировки здесь нет намеренно — своей
+# быть не должно (секреты редактирует `partest.redact`), а подключение `partest` пока не
+# сделано: его импорт тянет за собой загрузку конфигурации набора тестов.
+_SAVE_RAW_WARNING = (
+    "ВНИМАНИЕ: --save-raw пишет в файл прогона тела запросов целиком, до 500 символов "
+    "тела ответа на каждую ошибку и адрес каждого запроса с подставленными значениями "
+    "path_params — без маскировки. Там бывают учётные данные и чужие персональные данные: "
+    "файл прогона и собранный по нему дашборд не публикуйте и не передавайте как есть."
+)
+
+
+def _load_endpoints(path: Path) -> Dict[str, EndpointConfig]:
+    """Описания эндпоинтов; предупреждения схемы — строками в stderr, а не трассой модуля.
+
+    Предупреждения печатаются и тогда, когда разбор упал: ключ, который ни на что не
+    влияет, бывает ровно тем, что человек пытался настроить.
+    """
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", ConfigKeyWarning)
+        try:
+            return load_endpoints(path)
+        finally:
+            for item in caught:
+                if issubclass(item.category, ConfigKeyWarning):
+                    print(f"предупреждение: {path}: {item.message}", file=sys.stderr)
+
+
+def _describe_plan(engine, with_notes: bool = True) -> list:
+    """Строки плана для человека: фаза, потолок, темп, предел в полёте, список batch.
+
+    Печатается до нагрузки и на `--dry-run`: сколько нагрузки даст профиль, видно до
+    того, как она пошла на стенд. `with_notes` — печатать ли `plan_notes()`: на настоящем
+    прогоне их пишет в журнал `run_load_test`, и второй раз они не нужны.
+    """
+    profile = engine.profile
+    phases = engine.plan()
+    total = sum(phase.duration_sec for phase in phases)
+    hold = getattr(profile, "hold_after_breaking_sec", 0) or 0
+    held = f" (+{hold:g} с удержания, если порог сработает)" if hold else ""
+    lines = [f"план: фаз {len(phases)}, до {total:g} с{held}; воркеров {profile.workers}",
+             f"  {'фаза':<24} {'потолок':>8} {'темп, попыток/с':>16} {'в полёте/воркер':>16}"]
+    for phase in phases:
+        tempo = profile.workers * engine._phase_rate(phase)
+        lines.append(f"  {phase.name:<24} {phase.concurrency:>8} {tempo:>16.1f} "
+                     f"{engine._phase_requests_per_worker(phase):>16}")
+        if phase.requests is not None:
+            lines.append(f"    список: {phase.requests} запросов "
+                         "(варианты эндпоинта × repeat_count), фаза кончается на нём")
+    if hold:
+        lines.append(f"  {'hold-after-break':<24} уровень отказа, {hold:g} с в темпе того "
+                     "уровня, на котором сработал порог")
+    lines.append("  темп номинальный: разброс пейсинга делает его в среднем на ~10% ниже; "
+                 "потолок — предел одновременных запросов, а не их число")
+    for note in engine.plan_notes() if with_notes else []:
+        lines.append(f"  внимание: {note}")
+    return lines
+
+
+def print_summary(metrics: AggregatedMetrics, out=None, events=None) -> None:
     """Сводка прогона для человека. Единственное место в пакете, где уместна печать.
 
     Поток берётся в момент вызова, а не в момент определения функции: `sys.stdout` по
     умолчанию в сигнатуре запоминает тот поток, что был при импорте, и перенаправить вывод
-    вызывающему уже нечем.
+    вызывающему уже нечем. `events` — события прогона: остановка по порогу и итог
+    списка batch печатаются отдельными строками.
     """
     out = out if out is not None else sys.stdout
     lines = [
@@ -125,6 +195,17 @@ def print_summary(metrics: AggregatedMetrics, out=None) -> None:
         lines.append(f"  точка насыщения     : ≈ {metrics.saturation_point_concurrency}")
     lines.append(f"  деградация p95      : {metrics.degradation_slope_pct_per_min or 0.0:+.1f}% в минуту "
                  f"({metrics.degradation_status})")
+    for event in events or []:
+        if event.get("event") == "stopped":
+            lines.append(f"  ОСТАНОВЛЕН по порогу: фаза {event.get('phase')}, "
+                         f"{', '.join(event.get('reasons') or [])}")
+        elif event.get("event") == "breached":
+            lines.append(f"  ПОРОГ ДОСТИГНУТ (обрывать было нечего): фаза {event.get('phase')}, "
+                         f"{', '.join(event.get('reasons') or [])}")
+        elif event.get("event") == "batch_list":
+            done = f"{event.get('completed')} из {event.get('planned')}"
+            verdict = "пройден" if not event.get("reason") else f"НЕ пройден ({event['reason']})"
+            lines.append(f"  список batch        : {done}, {verdict}")
     lines.append("=" * 60)
     lines.append("")
     print("\n".join(lines), file=out)
@@ -151,7 +232,7 @@ def _build_report(args: argparse.Namespace) -> int:
 def _run(endpoint_cfg: EndpointConfig, profile, args: argparse.Namespace) -> int:
     raw_results, metrics_obj, events = asyncio.run(run_load_test(endpoint_cfg, profile))
     aggregated = AggregatedMetrics.from_run_metrics(metrics_obj)
-    print_summary(aggregated)
+    print_summary(aggregated, events=events)
 
     # Снимок конфигурации уезжает в открытый JSON рядом с замерами и живёт там месяцами.
     # Красная линия 4 в AGENTS.md: секреты не попадают ни в отчёт, ни в артефакт. Что
@@ -185,6 +266,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parser.parse_args(argv)
     logging.basicConfig(level=getattr(logging, args.log_level),
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    # httpx и httpcore на INFO пишут каждый запрос с полным адресом, включая значения
+    # query_params (ключи API, токены); h2 и hpack на DEBUG — заголовки, в том числе
+    # Authorization. Их журнал — не ниже WARNING при любом --log-level.
+    for noisy in ("httpx", "httpcore", "h2", "hpack"):
+        logging.getLogger(noisy).setLevel(max(logging.WARNING, getattr(logging, args.log_level)))
 
     if not args.report_only:
         missing = [name for name, value in
@@ -197,7 +283,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if args.report_only:
             return _build_report(args)
 
-        endpoints = load_endpoints(args.endpoints)
+        if args.save_raw:
+            print(_SAVE_RAW_WARNING, file=sys.stderr)
+        endpoints = _load_endpoints(args.endpoints)
         if args.endpoint not in endpoints:
             known = ", ".join(sorted(endpoints)) or "ни одного"
             print(f"В {args.endpoints} нет эндпоинта {args.endpoint!r}; есть: {known}",
@@ -212,11 +300,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # личность прогона, и выяснять её годность после нагрузки ещё дороже.
         validate_run_names(operation=endpoint_cfg.operation(), slug=args.endpoint,
                            profile_name=_profile_name(args))
+        # Неподставленный `{placeholder}` пути — тоже отказ до нагрузки, и на сухом прогоне.
+        endpoint_cfg.require_path_params()
 
-        print(f"эндпоинт {args.endpoint!r}: {endpoint_cfg.method} {endpoint_cfg.url()}")
+        # Адрес первого варианта: у вариантов могут быть свои значения `{placeholders}`.
+        first_url = _bare_base(endpoint_cfg.url(endpoint_cfg.payloads[0].path_params))
+        print(f"эндпоинт {args.endpoint!r}: {endpoint_cfg.method} {first_url}")
         print(f"операция прогона: {endpoint_cfg.operation()}")
         print("профиль:")
         print(json.dumps(profile.model_dump(mode="json"), ensure_ascii=False, indent=2))
+        print("\n".join(_describe_plan(ENGINES[profile.type](profile, endpoint_cfg),
+                                        with_notes=args.dry_run)))
 
         if args.dry_run:
             print("\nСухой прогон: ни один запрос не отправлен.")
